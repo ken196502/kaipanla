@@ -104,9 +104,23 @@ function HitDrawer({
 
   const activeHit = peers.find((p) => p.code === activeCode) ?? selection.hit;
 
-  // 展示窗口：归属月 1 号起 ~ 该月月末（不带上月 / 去年 12 月）
-  const from = `${year}-${pad2(month.month)}-01`;
+  /**
+   * 基准锚点：同板块涨幅最大的那只票。
+   * 它的最低点日 = 全图起点 = 0% 基准；其余个股的 K 线也从这一天开始画（跨月无妨）。
+   */
+  const anchor = useMemo(
+    () => peers.reduce<SurgeHit>(
+      (best, p) => (p.gainPct > best.gainPct ? p : best),
+      peers[0] ?? selection.hit,
+    ),
+    [peers, selection.hit],
+  );
+
+  // 展示窗口：锚点的最低点日 ~ 归属月末（起点可能落在上一个月，跨月无妨）
   const to = monthEnd(year, month.month);
+  const from = anchor.baseDay <= to
+    ? anchor.baseDay
+    : `${year}-${pad2(month.month)}-01`;
 
   const codesKey = [...new Set(peers.map((p) => p.code))].join(',');
 
@@ -173,7 +187,10 @@ function HitDrawer({
             <span className="drawer-info-gain">自最低点涨幅 <b className="up">+{activeHit.gainPct.toFixed(2)}%</b></span>
           </div>
           <div className="drawer-info-row">
-            <span>展示区间 {shortDay(from)} ~ {shortDay(to)}{lastDay ? `（数据到 ${shortDay(lastDay)}）` : ''}</span>
+            <span>图表区间 {shortDay(from)} ~ {shortDay(to)}{lastDay ? `（数据到 ${shortDay(lastDay)}）` : ''}</span>
+            <span className="drawer-info-anchor">
+              0% 基准 · {anchor.name || anchor.code} {anchor.baseDay} 收盘（板块涨幅最大）
+            </span>
             <span>最低点 {activeHit.baseDay} ¥{activeHit.basePrice.toFixed(2)}</span>
             <span>其后最高点 {activeHit.peakDay} ¥{activeHit.peakPrice.toFixed(2)}</span>
             <span>跨越 {activeHit.sessions} 个交易日 · 窗口内 {series.find((s) => s.code === activeHit.code)?.rows.length ?? '—'} 根日K</span>
@@ -193,7 +210,7 @@ function HitDrawer({
             <OverlayChart
               series={shown}
               marks={activeMarks}
-              baseLabel={`纵轴＝相对 ${shortDay(from)} 首日收盘的涨跌幅（0% 为基准）`}
+              baseLabel={`纵轴＝相对 ${anchor.baseDay} 收盘的涨跌幅（0% 为基准）`}
             />
           )}
         </div>
@@ -215,13 +232,14 @@ function HitDrawer({
             {peers.map((p) => (
               <button
                 key={p.code}
-                className={`peer-chip${p.code === activeCode ? ' is-active' : ''}`}
+                className={`peer-chip${p.code === activeCode ? ' is-active' : ''}${p.code === anchor.code ? ' is-anchor' : ''}`}
                 onClick={() => setActiveCode(p.code)}
-                title={`${p.name} ${p.code}\n${p.baseDay} ¥${p.basePrice.toFixed(2)} → ${p.peakDay} ¥${p.peakPrice.toFixed(2)}\n${p.ownerNote}\n点击切换K线`}
+                title={`${p.name} ${p.code}\n${p.baseDay} ¥${p.basePrice.toFixed(2)} → ${p.peakDay} ¥${p.peakPrice.toFixed(2)}\n${p.ownerNote}${p.code === anchor.code ? '\n★ 本图 0% 基准（板块涨幅最大）' : ''}\n点击切换K线`}
               >
                 <i className="peer-dot" style={{ background: stockColors.get(p.code) ?? '#9aa7b8' }} />
                 <b>{p.name || p.code}</b>
                 <i className="mono">{p.code}</i>
+                {p.code === anchor.code && <i className="peer-anchor">基准</i>}
                 <em className="peer-gain">+{p.gainPct.toFixed(1)}%</em>
               </button>
             ))}

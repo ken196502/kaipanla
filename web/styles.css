@@ -459,6 +459,7 @@ button:disabled { cursor: not-allowed; opacity: .42; }
 .drawer-info-gain b { font-size: 15px; }
 .drawer-info-owner { color: var(--muted); }
 .drawer-info-owner b { margin-right: 6px; }
+.drawer-info-anchor { color: var(--sub); font-weight: 600; }
 .drawer-chart {
   flex: 1; min-height: 0; display: flex; padding: 6px 10px;
   border-top: 1px solid var(--border-soft); overflow: hidden;
@@ -510,6 +511,11 @@ button:disabled { cursor: not-allowed; opacity: .42; }
 .peer-chip b { font-size: 12px; font-weight: 600; color: var(--text); }
 .peer-chip i { font-style: normal; font-size: 10px; color: var(--muted); }
 .peer-chip .peer-gain { font-style: normal; font-weight: 650; color: var(--up); }
+.peer-chip .peer-anchor {
+  font-style: normal; font-size: 9px; padding: 1px 4px; border-radius: 3px;
+  background: #eef2f7; color: var(--muted); font-weight: 600;
+}
+.peer-chip.is-anchor { border-color: #b7c4d6; }
 .peer-chip:hover { border-color: #b7c4d6; background: #f6f9fc; }
 .peer-chip.is-active { border-color: var(--up); background: #fdeeee; }
 .peer-chip.is-active b { color: var(--up); }
