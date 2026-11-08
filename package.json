@@ -1,0 +1,44 @@
+{
+  "name": "kpl-review",
+  "version": "0.2.0",
+  "description": "开盘啦涨停数据复盘：Vite + React 前端 / Node API 后端 / node:sqlite 存储（保留原 CLI）",
+  "type": "module",
+  "bin": {
+    "kpl-review": "./dist-cli/cli.js"
+  },
+  "scripts": {
+    "dev": "NODE_OPTIONS=--disable-warning=ExperimentalWarning vite --host 127.0.0.1",
+    "build": "NODE_OPTIONS=--disable-warning=ExperimentalWarning vite build",
+    "preview": "NODE_OPTIONS=--disable-warning=ExperimentalWarning vite preview --host 127.0.0.1",
+    "start": "NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx server/standalone.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "build:cli": "tsc -p tsconfig.json",
+    "cli": "tsx src/cli.ts",
+    "cli:snapshot": "tsx src/cli.ts snapshot",
+    "cli:year": "tsx src/cli.ts year",
+    "cli:probe": "tsx src/cli.ts probe",
+    "cli:serve": "tsx src/cli.ts serve",
+    "ax:build": "clang -fobjc-arc -framework Foundation -framework AppKit -framework ApplicationServices -framework CoreGraphics tools/kpl-ax.m -o bin/kpl-ax"
+  },
+  "dependencies": {
+    "commander": "^14.0.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.3.7"
+  },
+  "packageManager": "pnpm@10.14.0",
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}

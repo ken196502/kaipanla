@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dist-cli/
+data/
+*.log
+.DS_Store
+.env
+output/
+.workbuddy/
+__pycache__/
+*.pyc
