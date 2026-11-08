@@ -43,13 +43,17 @@ function shortDay(day: string): string {
   return day ? day.slice(5) : '—';
 }
 
-function pad2(n: number): string {
-  return String(n).padStart(2, '0');
-}
-
-/** 某年某月的最后一天 */
-function monthEnd(year: number, month: number): string {
-  return `${year}-${pad2(month)}-${pad2(new Date(year, month, 0).getDate())}`;
+/**
+ * 板块是否命中搜索：关键词按空白（含全角空格）拆成多个，任一词命中即算命中板块（OR）。
+ * 单个词的命中条件：板块名包含该词，或组内任一股票代码 / 名称包含该词。
+ * 空关键词（含纯空白）＝全部命中。
+ */
+function sectorMatchesGroup(group: SectorGroup, keyword: string): boolean {
+  const terms = keyword.toLowerCase().split(/[\s\u3000]+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  const sector = group.sector.toLowerCase();
+  return terms.some((term) => sector.includes(term)
+    || group.items.some((h) => h.code.includes(term) || h.name.toLowerCase().includes(term)));
 }
 
 /**
@@ -58,15 +62,10 @@ function monthEnd(year: number, month: number): string {
  * yearCount 只用于组头提示里的全年合计数字。
  */
 function groupBySector(
-  items: SurgeHit[], keyword: string, sectorMeta: Map<string, SectorMeta>,
+  items: SurgeHit[], sectorMeta: Map<string, SectorMeta>,
 ): SectorGroup[] {
-  const matched = keyword
-    ? items.filter((h) => h.code.includes(keyword)
-      || h.name.toLowerCase().includes(keyword)
-      || h.sector.toLowerCase().includes(keyword))
-    : items;
   const map = new Map<string, SurgeHit[]>();
-  for (const hit of matched) {
+  for (const hit of items) {
     const list = map.get(hit.sector) ?? [];
     list.push(hit);
     map.set(hit.sector, list);
@@ -82,17 +81,17 @@ function groupBySector(
 
 /**
  * 点击某只票后展开的板块详情：
- * - K 线只展示「归属月 1 号 ~ 月末」，纵轴是百分比，可直接叠加同板块个股比较；
- * - 下方列出同板块本月个股，点一下直接切换主图，不用关面板重选；
- * - 选中票用红绿（涨空心 / 跌实心），其它票每只一种颜色叠加。
+ * - 图表区间＝同板块所有个股里「最早的最低点日」~「最晚的最高点日」，
+ *   正好覆盖该板块每只票的完整波段，可跨月甚至跨年；
+ * - 纵轴是相对各自起点收盘的百分比，选中票红绿（涨空心 / 跌实心），其它票每只一色叠加；
+ * - 下方列出同板块本月个股，点一下直接切换主图，不用关面板重选。
  */
 function HitDrawer({
-  selection, peers, year, onClose,
+  selection, peers, onClose,
 }: {
   selection: Selection;
   /** 同板块本月全部命中个股 */
   peers: SurgeHit[];
-  year: number;
   onClose: () => void;
 }) {
   const { month } = selection;
@@ -105,22 +104,30 @@ function HitDrawer({
   const activeHit = peers.find((p) => p.code === activeCode) ?? selection.hit;
 
   /**
-   * 基准锚点：同板块涨幅最大的那只票。
-   * 它的最低点日 = 全图起点 = 0% 基准；其余个股的 K 线也从这一天开始画（跨月无妨）。
+   * 起点：把同板块所有个股的最低点日排一遍，谁最早就用谁。
+   * 该日 = 全图起点 = 0% 基准，其余个股也从这一天开始画（跨月无妨）。
    */
   const anchor = useMemo(
     () => peers.reduce<SurgeHit>(
-      (best, p) => (p.gainPct > best.gainPct ? p : best),
+      (best, p) => (p.baseDay < best.baseDay ? p : best),
       peers[0] ?? selection.hit,
     ),
     [peers, selection.hit],
   );
 
-  // 展示窗口：锚点的最低点日 ~ 归属月末（起点可能落在上一个月，跨月无妨）
-  const to = monthEnd(year, month.month);
-  const from = anchor.baseDay <= to
-    ? anchor.baseDay
-    : `${year}-${pad2(month.month)}-01`;
+  /** 终点：把同板块所有个股的最高点日排一遍，谁最晚就用谁 */
+  const tail = useMemo(
+    () => peers.reduce<SurgeHit>(
+      (best, p) => (p.peakDay > best.peakDay ? p : best),
+      peers[0] ?? selection.hit,
+    ),
+    [peers, selection.hit],
+  );
+
+  // 展示窗口：最早最低点 ~ 最晚最高点，正好覆盖板块内每只票的完整波段
+  // baseDay / peakDay 均为 YYYY-MM-DD，字典序即日期序，直接比较即可
+  const from = anchor.baseDay;
+  const to = tail.peakDay > from ? tail.peakDay : from;
 
   const codesKey = [...new Set(peers.map((p) => p.code))].join(',');
 
@@ -187,9 +194,12 @@ function HitDrawer({
             <span className="drawer-info-gain">自最低点涨幅 <b className="up">+{activeHit.gainPct.toFixed(2)}%</b></span>
           </div>
           <div className="drawer-info-row">
-            <span>图表区间 {shortDay(from)} ~ {shortDay(to)}{lastDay ? `（数据到 ${shortDay(lastDay)}）` : ''}</span>
+            <span>图表区间 {shortDay(from)} ~ {shortDay(to)}{lastDay && lastDay < to ? `（数据到 ${shortDay(lastDay)}）` : ''}</span>
             <span className="drawer-info-anchor">
-              0% 基准 · {anchor.name || anchor.code} {anchor.baseDay} 收盘（板块涨幅最大）
+              0% 基准 · {anchor.name || anchor.code} {anchor.baseDay} 收盘（板块最早最低点）
+            </span>
+            <span className="drawer-info-tail">
+              截止 · {tail.name || tail.code} {tail.peakDay}（板块最晚最高点）
             </span>
             <span>最低点 {activeHit.baseDay} ¥{activeHit.basePrice.toFixed(2)}</span>
             <span>其后最高点 {activeHit.peakDay} ¥{activeHit.peakPrice.toFixed(2)}</span>
@@ -232,14 +242,15 @@ function HitDrawer({
             {peers.map((p) => (
               <button
                 key={p.code}
-                className={`peer-chip${p.code === activeCode ? ' is-active' : ''}${p.code === anchor.code ? ' is-anchor' : ''}`}
+                className={`peer-chip${p.code === activeCode ? ' is-active' : ''}${p.code === anchor.code ? ' is-anchor' : ''}${p.code === tail.code ? ' is-tail' : ''}`}
                 onClick={() => setActiveCode(p.code)}
-                title={`${p.name} ${p.code}\n${p.baseDay} ¥${p.basePrice.toFixed(2)} → ${p.peakDay} ¥${p.peakPrice.toFixed(2)}\n${p.ownerNote}${p.code === anchor.code ? '\n★ 本图 0% 基准（板块涨幅最大）' : ''}\n点击切换K线`}
+                title={`${p.name} ${p.code}\n${p.baseDay} ¥${p.basePrice.toFixed(2)} → ${p.peakDay} ¥${p.peakPrice.toFixed(2)}\n${p.ownerNote}${p.code === anchor.code ? '\n★ 本图 0% 基准（板块最早最低点）' : ''}${p.code === tail.code ? '\n★ 本图截止日（板块最晚最高点）' : ''}\n点击切换K线`}
               >
                 <i className="peer-dot" style={{ background: stockColors.get(p.code) ?? '#9aa7b8' }} />
                 <b>{p.name || p.code}</b>
                 <i className="mono">{p.code}</i>
                 {p.code === anchor.code && <i className="peer-anchor">基准</i>}
+                {p.code === tail.code && <i className="peer-tail">截止</i>}
                 <em className="peer-gain">+{p.gainPct.toFixed(1)}%</em>
               </button>
             ))}
@@ -272,10 +283,12 @@ function MonthColumn({
   onSelect: (hit: SurgeHit) => void;
 }) {
   const groups = useMemo(
-    () => groupBySector(month.items, keyword, sectorMeta),
-    [month.items, keyword, sectorMeta],
+    () => groupBySector(month.items, sectorMeta),
+    [month.items, sectorMeta],
   );
-  const matched = groups.reduce((sum, g) => sum + g.items.length, 0);
+  const hitSectors = keyword
+    ? groups.filter((g) => sectorMatchesGroup(g, keyword)).length
+    : groups.length;
   const keys = groups.map((g) => `${month.month}|${g.sector}`);
   const allCollapsed = keys.length > 0 && keys.every((k) => collapsed[k]);
   const noData = month.status === 'upcoming';
@@ -284,7 +297,12 @@ function MonthColumn({
     <section className={`surge-col status-${month.status}`}>
       <div className="surge-col-head">
         <div className="surge-col-title">
-          <b>{month.label}</b>
+          <span className="surge-col-name">
+            <b>{month.label}</b>
+            {month.partial && (
+              <span className="surge-col-partial">（数据截至 {shortDay(month.actualTo)}）</span>
+            )}
+          </span>
           <span className="surge-col-count">{month.total} 只</span>
         </div>
         <div className="surge-col-window" title={month.note || undefined}>
@@ -292,7 +310,6 @@ function MonthColumn({
           {' – '}{shortDay(month.windowTo)} · {month.sectorCount} 个板块
         </div>
         {month.prevYearIncluded && <div className="surge-col-flag">含去年 12 月 · 两月窗口</div>}
-        {month.partial && <div className="surge-col-flag">数据截至 {shortDay(month.actualTo)}</div>}
         {month.status === 'empty' && <div className="surge-col-flag">无命中</div>}
         {groups.length > 0 && (
           <button
@@ -309,11 +326,12 @@ function MonthColumn({
         {noData ? (
           <div className="surge-col-empty">{month.note}</div>
         ) : groups.length === 0 ? (
-          <div className="surge-col-empty">{keyword ? '本列无匹配个股/板块' : '没有涨幅达标的个股'}</div>
+          <div className="surge-col-empty">没有涨幅达标的个股</div>
         ) : groups.map((group) => {
           const key = `${month.month}|${group.sector}`;
           const isCollapsed = !!collapsed[key];
-          const showAll = keyword !== '' || perGroup === 0 || !!expanded[key];
+          const sectorHit = sectorMatchesGroup(group, keyword);
+          const showAll = perGroup === 0 || !!expanded[key] || (!!keyword && sectorHit);
           const visible = showAll ? group.items : group.items.slice(0, perGroup);
           const meta = sectorMeta.get(group.sector);
           const groupStyle = meta ? ({
@@ -321,7 +339,11 @@ function MonthColumn({
             '--sector-accent': meta.color.accent,
           } as CSSProperties) : undefined;
           return (
-            <div className="surge-group" key={group.sector} style={groupStyle}>
+            <div
+              className={`surge-group${sectorHit ? '' : ' is-dim'}`}
+              key={group.sector}
+              style={groupStyle}
+            >
               <button
                 className={`surge-group-head${isCollapsed ? ' is-collapsed' : ''}`}
                 onClick={() => onToggleGroup(key)}
@@ -369,7 +391,7 @@ function MonthColumn({
       <div className="surge-col-foot">
         {noData
           ? '待数据'
-          : `全部 ${month.total} 只 / ${month.sectorCount} 板块${keyword ? ` · 匹配 ${matched}` : ''}${perGroup > 0 && !keyword ? ` · 每组前 ${perGroup}` : ''}`}
+          : `全部 ${month.total} 只 / ${month.sectorCount} 板块${keyword ? ` · 命中 ${hitSectors} 板块` : ''}${perGroup > 0 && !keyword ? ` · 每组前 ${perGroup}` : ''}`}
       </div>
     </section>
   );
@@ -459,6 +481,25 @@ export default function SurgeBoard() {
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
+  /** 标题行全局按钮：作用于 12 列当前可见的全部板块分组（跟随搜索过滤结果） */
+  const allGroupKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const m of data?.months ?? []) {
+      for (const g of groupBySector(m.items, sectorMeta)) {
+        keys.push(`${m.month}|${g.sector}`);
+      }
+    }
+    return keys;
+  }, [data, sectorMeta]);
+  const allCollapsed = allGroupKeys.length > 0 && allGroupKeys.every((k) => collapsed[k]);
+  const allExpanded = allGroupKeys.length > 0 && allGroupKeys.every((k) => !collapsed[k]);
+  const setAllCollapsed = (value: boolean): void => {
+    const next: Record<string, boolean> = {};
+    if (value) for (const key of allGroupKeys) next[key] = true;
+    // 展开时直接清空，顺带复位被搜索过滤掉的分组旧状态
+    setCollapsed(next);
+  };
+
   return (
     <main className={`surge-page${loading && data ? ' is-loading' : ''}`}>
       <div className="surge-toolbar">
@@ -469,6 +510,18 @@ export default function SurgeBoard() {
           </div>
           <div className="surge-heading-right">
             {loading && <span className="surge-busy">统计中…</span>}
+            <button
+              className="btn"
+              disabled={!allGroupKeys.length || allExpanded}
+              onClick={() => setAllCollapsed(false)}
+              title={allExpanded ? '当前已全部展开' : '展开 12 列全部板块分组（与每列「展开全部板块」同义）'}
+            >全部展开</button>
+            <button
+              className="btn"
+              disabled={!allGroupKeys.length || allCollapsed}
+              onClick={() => setAllCollapsed(true)}
+              title={allCollapsed ? '当前已全部折叠' : '折叠 12 列全部板块分组（与每列「折叠全部板块」同义）'}
+            >全部折叠</button>
             <button className="btn" onClick={() => void load(true)} title="强制重新读取数据库">刷新</button>
           </div>
         </div>
@@ -525,7 +578,7 @@ export default function SurgeBoard() {
           </label>
           <input
             className="search surge-search" value={search}
-            placeholder="代码 / 名称 / 板块（跨月定位）"
+            placeholder="代码 / 名称 / 板块 · 空格分隔多个关键词"
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
@@ -544,9 +597,6 @@ export default function SurgeBoard() {
               <span>12 列合计 <b className="up">{data.totalHits.toLocaleString()}</b> 条</span>
               <span>去重 <b>{data.duplicatesRemoved.toLocaleString()}</b> 次 · 板块 <b>{sectorTotal}</b> 类</span>
               <span className="surge-summary-note">{data.fromCache ? '缓存命中' : `计算 ${data.elapsedMs} ms`}</span>
-              <span className="surge-rule">
-                口径：上月 1 日 ~ 当月末（1 月含去年 12 月）· 最低价 → 其后最高价 ≥ {data.threshold}%；去年 12 月只作低点来源，跨年波归 1 月 · 板块按当月股票数降序（强的在上），配色按行业冷暖区分（族内深浅），组头数字为本月数量
-              </span>
             </>
           ) : (
             <span>正在读取全年日K…</span>
@@ -591,7 +641,6 @@ export default function SurgeBoard() {
           key={`${selection.hit.code}|${selection.month.month}`}
           selection={selection}
           peers={peers}
-          year={data?.year ?? activeYear}
           onClose={() => setSelection(null)}
         />
       )}
